@@ -34,7 +34,7 @@ function Routes() {
 
   if (datasources.length === 0) {
     return (
-      <AppShell sidebar={<SidebarPlaceholder />}>
+      <AppShell>
         <FirstRun onConnected={() => { /* storage drives re-render */ }} />
       </AppShell>
     );
@@ -43,7 +43,6 @@ function Routes() {
   return (
     <>
       <AppShell
-        sidebar={<SidebarPlaceholder />}
         onAdd={() => setModal({ kind: 'add' })}
         onEdit={(ds) => setModal({ kind: 'edit', ds })}
       >
@@ -70,18 +69,5 @@ function Routes() {
         />
       )}
     </>
-  );
-}
-
-function SidebarPlaceholder() {
-  return (
-    <div className="p-4 text-sm text-muted-foreground">
-      <div className="uppercase tracking-wider text-xs text-subtle-foreground mb-2">
-        Labels
-      </div>
-      <p className="text-subtle-foreground">
-        Label browser lands in the next commit.
-      </p>
-    </div>
   );
 }

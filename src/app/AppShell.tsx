@@ -4,25 +4,22 @@ import { DatasourcePicker } from '@/features/datasource/DatasourcePicker';
 import type { StoredDatasource } from '@/lib/state/datasources';
 
 interface AppShellProps {
-  sidebar: ReactNode;
   children: ReactNode;
   onAdd?: () => void;
   onEdit?: (ds: StoredDatasource) => void;
 }
 
-export function AppShell({ sidebar, children, onAdd, onEdit }: AppShellProps) {
+/**
+ * Top-level shell: fixed header with brand + datasource picker + theme
+ * toggle. Children render below and own their own layout (sidebar +
+ * content split lives inside Explore so the sidebar has direct access
+ * to the active query and time range).
+ */
+export function AppShell({ children, onAdd, onEdit }: AppShellProps) {
   return (
-    <div className="min-h-dvh flex flex-col bg-background text-foreground">
+    <div className="h-dvh flex flex-col bg-background text-foreground">
       <TopBar onAdd={onAdd} onEdit={onEdit} />
-      <div className="flex-1 flex min-h-0">
-        <aside
-          className="w-[280px] shrink-0 border-r border-border bg-card hidden md:block"
-          aria-label="Label browser"
-        >
-          {sidebar}
-        </aside>
-        <main className="flex-1 min-w-0 overflow-auto">{children}</main>
-      </div>
+      <div className="flex-1 min-h-0">{children}</div>
     </div>
   );
 }

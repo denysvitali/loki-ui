@@ -1,6 +1,6 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { LokiClient, type QueryResponse, type Stream } from '@/lib/loki';
+import { LokiClient, type QueryResponse } from '@/lib/loki';
 import { describe as describeError, LokiRequestError } from '@/lib/loki';
 import {
   loadCredentials,
@@ -9,6 +9,7 @@ import {
 } from '@/lib/state/datasources';
 import { useUrlState } from '@/lib/state/useUrlState';
 import { resolveRange, browserTimeZone } from '@/lib/time/grammar';
+import { LabelBrowser } from '@/features/labels/LabelBrowser';
 import { TimeRangePicker } from './TimeRangePicker';
 import { LogList } from './LogList';
 import { Histogram } from './Histogram';
@@ -26,7 +27,6 @@ export function Explore({ ds }: ExploreProps) {
     to: 'now',
   };
 
-  // Keep the datasource selection mirrored into URL state.
   useMirrorDatasource(pane.datasourceId, ds.id, (id) =>
     updateUrl((s) => ({
       ...s,
@@ -36,12 +36,17 @@ export function Explore({ ds }: ExploreProps) {
 
   const [draftQuery, setDraftQuery] = useState(pane.query);
 
-  const onRun = (e?: FormEvent) => {
-    e?.preventDefault();
+  const setQuery = (q: string) => {
+    setDraftQuery(q);
     updateUrl((s) => ({
       ...s,
-      panes: [{ ...(s.panes[0] ?? pane), query: draftQuery }],
+      panes: [{ ...(s.panes[0] ?? pane), query: q }],
     }));
+  };
+
+  const onRun = (e?: FormEvent) => {
+    e?.preventDefault();
+    setQuery(draftQuery);
   };
 
   const onTimeChange = (from: string, to: string) => {
@@ -56,14 +61,18 @@ export function Explore({ ds }: ExploreProps) {
     [ds.id, ds.url, ds.authType, ds.tenant, ds.credentialTier],
   );
 
-  const range = useMemo(() => {
-    if (!pane.query.trim()) return null;
+  // Always resolve a range so the label browser can work before a query runs.
+  const liveRange = useMemo(() => {
     try {
       return resolveRange(pane.from, pane.to, new Date(), browserTimeZone());
     } catch {
       return null;
     }
-  }, [pane.query, pane.from, pane.to]);
+  }, [pane.from, pane.to]);
+
+  const queryRange = useMemo(() => {
+    return pane.query.trim() ? liveRange : null;
+  }, [pane.query, liveRange]);
 
   const queryKey = [
     'queryRange',
@@ -76,14 +85,14 @@ export function Explore({ ds }: ExploreProps) {
 
   const result = useQuery<QueryResponse, LokiRequestError>({
     queryKey,
-    enabled: Boolean(range && pane.query.trim()),
+    enabled: Boolean(queryRange && pane.query.trim()),
     queryFn: async ({ signal }) => {
-      if (!range) throw new Error('no range');
+      if (!queryRange) throw new Error('no range');
       return client.queryRange(
         {
           query: pane.query,
-          start: range.fromNs,
-          end: range.toNs,
+          start: queryRange.fromNs,
+          end: queryRange.toNs,
           limit: urlState.limit,
           direction: 'backward',
         },
@@ -92,127 +101,215 @@ export function Explore({ ds }: ExploreProps) {
     },
   });
 
+  const selector = extractSelector(draftQuery || pane.query);
+
+  const handleInsertLabel = (
+    label: string,
+    value: string,
+    op: '=' | '!=' | '=~' | '!~',
+  ) => {
+    const next = insertLabelInSelector(draftQuery || pane.query, label, value, op);
+    setQuery(next);
+  };
+
+  const handleAddLineFilter = (
+    op: '|=' | '!=' | '|~' | '!~',
+    text: string,
+  ) => {
+    const trimmed = text.trim();
+    const quoted =
+      trimmed.startsWith('"') || trimmed.startsWith('`')
+        ? trimmed
+        : JSON.stringify(trimmed);
+    const clause = `${op} ${quoted}`;
+    const base = draftQuery || pane.query || selector || '{}';
+    const next = `${base.trim()} ${clause}`;
+    setQuery(next);
+  };
+
   return (
-    <div className="flex flex-col h-full min-h-0">
-      <form
-        onSubmit={onRun}
-        className="border-b border-border bg-card/40 p-3 space-y-2 flex-shrink-0"
+    <div className="h-full flex min-h-0">
+      <aside
+        className="w-[300px] shrink-0 border-r border-border bg-card hidden md:flex flex-col min-h-0"
+        aria-label="Label browser"
       >
-        <textarea
-          value={draftQuery}
-          onChange={(e) => setDraftQuery(e.target.value)}
-          onKeyDown={(e) => {
-            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-              e.preventDefault();
-              onRun();
-            }
-          }}
-          placeholder='{app="foo"} |= "error"'
-          rows={2}
-          spellCheck={false}
-          className="w-full px-3 py-2 rounded-md bg-background border border-input font-mono text-sm text-foreground placeholder:text-subtle-foreground focus:border-ring focus:outline-none resize-y"
-        />
-        <div className="flex items-center gap-2 flex-wrap">
-          <TimeRangePicker from={pane.from} to={pane.to} onChange={onTimeChange} />
-          <div className="flex-1" />
-          <LimitSelect
-            value={urlState.limit}
-            onChange={(limit) => updateUrl((s) => ({ ...s, limit }))}
+        {liveRange ? (
+          <LabelBrowser
+            ds={ds}
+            selector={selector}
+            fromNs={liveRange.fromNs}
+            toNs={liveRange.toNs}
+            onInsertLabel={handleInsertLabel}
+            onAddLineFilter={handleAddLineFilter}
           />
-          <button
-            type="submit"
-            className="h-8 px-4 rounded-md text-sm font-medium bg-accent text-accent-foreground hover:opacity-90 transition-opacity"
-            title="Run query (Ctrl/Cmd+Enter)"
-          >
-            Run
-          </button>
-        </div>
-      </form>
-
-      <div className="flex-1 min-h-0 overflow-auto">
-        {!pane.query.trim() && (
-          <EmptyState>
-            Type a LogQL query above and press <Kbd>Ctrl</Kbd>+<Kbd>Enter</Kbd>{' '}
-            to run.
-          </EmptyState>
-        )}
-
-        {pane.query.trim() && result.isLoading && (
-          <EmptyState>Running query…</EmptyState>
-        )}
-
-        {result.isError && (
-          <div className="p-4 max-w-3xl">
-            <ErrorBanner error={result.error} />
+        ) : (
+          <div className="p-3 text-xs text-subtle-foreground">
+            Invalid time range.
           </div>
         )}
+      </aside>
 
-        {result.data && result.data.data.resultType === 'streams' && (
-          <div className="h-full flex flex-col">
-            {range && (
-              <Histogram
-                ds={ds}
-                query={pane.query}
-                fromNs={range.fromNs}
-                toNs={range.toNs}
-                onZoom={(fromNs, toNs) => {
-                  onTimeChange(fromNs.toString(), toNs.toString());
-                }}
-              />
-            )}
-            <div className="flex-1 min-h-0">
-              <LogList
-                streams={result.data.data.result}
-                wrap={urlState.wrap}
-                onToggleWrap={() =>
-                  updateUrl((s) => ({ ...s, wrap: !s.wrap }))
-                }
-                stats={result.data.data.stats}
-                onFilterByField={(label, value) => {
-                  const inserted = appendFilter(pane.query, label, value);
-                  setDraftQuery(inserted);
-                  updateUrl((s) => ({
-                    ...s,
-                    panes: [
-                      { ...(s.panes[0] ?? pane), query: inserted },
-                    ],
-                  }));
-                }}
-              />
-            </div>
+      <div className="flex-1 flex flex-col min-w-0 min-h-0">
+        <form
+          onSubmit={onRun}
+          className="border-b border-border bg-card/40 p-3 space-y-2 flex-shrink-0"
+        >
+          <textarea
+            value={draftQuery}
+            onChange={(e) => setDraftQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                e.preventDefault();
+                onRun();
+              }
+            }}
+            placeholder='{app="foo"} |= "error"'
+            rows={2}
+            spellCheck={false}
+            className="w-full px-3 py-2 rounded-md bg-background border border-input font-mono text-sm text-foreground placeholder:text-subtle-foreground focus:border-ring focus:outline-none resize-y"
+          />
+          <div className="flex items-center gap-2 flex-wrap">
+            <TimeRangePicker
+              from={pane.from}
+              to={pane.to}
+              onChange={onTimeChange}
+            />
+            <div className="flex-1" />
+            <LimitSelect
+              value={urlState.limit}
+              onChange={(limit) => updateUrl((s) => ({ ...s, limit }))}
+            />
+            <button
+              type="submit"
+              className="h-8 px-4 rounded-md text-sm font-medium bg-accent text-accent-foreground hover:opacity-90 transition-opacity"
+              title="Run query (Ctrl/Cmd+Enter)"
+            >
+              Run
+            </button>
           </div>
-        )}
+        </form>
 
-        {result.data &&
-          (result.data.data.resultType === 'matrix' ||
-            result.data.data.resultType === 'vector') && (
+        <div className="flex-1 min-h-0 flex flex-col">
+          {!pane.query.trim() && (
             <EmptyState>
-              Metric queries render as a chart in the next commit. Response
-              type: {result.data.data.resultType}.
+              Type a LogQL query above and press <Kbd>Ctrl</Kbd>+
+              <Kbd>Enter</Kbd> to run.
             </EmptyState>
           )}
 
-        {result.data &&
-          result.data.data.resultType === 'streams' &&
-          (result.data.data.result as Stream[]).length === 0 && (
-            <EmptyState>No logs matched in this time range.</EmptyState>
+          {pane.query.trim() && result.isLoading && (
+            <EmptyState>Running query…</EmptyState>
           )}
+
+          {result.isError && (
+            <div className="p-4 max-w-3xl">
+              <ErrorBanner error={result.error} />
+            </div>
+          )}
+
+          {result.data && result.data.data.resultType === 'streams' && (
+            <>
+              {queryRange && (
+                <Histogram
+                  ds={ds}
+                  query={pane.query}
+                  fromNs={queryRange.fromNs}
+                  toNs={queryRange.toNs}
+                  onZoom={(fromNs, toNs) => {
+                    onTimeChange(fromNs.toString(), toNs.toString());
+                  }}
+                />
+              )}
+              <div className="flex-1 min-h-0">
+                {result.data.data.result.length === 0 ? (
+                  <EmptyState>No logs matched in this time range.</EmptyState>
+                ) : (
+                  <LogList
+                    streams={result.data.data.result}
+                    wrap={urlState.wrap}
+                    onToggleWrap={() =>
+                      updateUrl((s) => ({ ...s, wrap: !s.wrap }))
+                    }
+                    stats={result.data.data.stats}
+                    onFilterByField={(label, value) =>
+                      handleInsertLabel(label, value, '=')
+                    }
+                  />
+                )}
+              </div>
+            </>
+          )}
+
+          {result.data &&
+            (result.data.data.resultType === 'matrix' ||
+              result.data.data.resultType === 'vector') && (
+              <EmptyState>
+                Metric queries render as a chart in a later commit.
+                resultType: {result.data.data.resultType}.
+              </EmptyState>
+            )}
+        </div>
       </div>
     </div>
   );
 }
 
+/** Extract the leading `{...}` stream selector from a LogQL query. */
+function extractSelector(query: string): string {
+  const m = /^\s*(\{[^}]*\})/.exec(query);
+  return m ? m[1]! : '';
+}
+
 /**
- * Adds `| label="value"` to a LogQL query (or replaces existing equality
- * for the same label). Best-effort — good enough for the "filter by"
- * affordance; full AST editing comes with the CodeMirror commit.
+ * Insert or extend `label<op>"value"` in the leading stream selector of a
+ * LogQL query. Best-effort:
+ *   - New label with `=`  → append inside {...}
+ *   - Existing label with `=` and different value → switch to `=~"a|b"`
+ *   - Existing label with `!=` etc → append (user will clean up)
+ * If the query has no selector, creates one.
  */
-function appendFilter(query: string, label: string, value: string): string {
+function insertLabelInSelector(
+  query: string,
+  label: string,
+  value: string,
+  op: '=' | '!=' | '=~' | '!~',
+): string {
   const escaped = value.replace(/"/g, '\\"');
-  const clause = `| ${label}="${escaped}"`;
-  // If the query already contains this exact clause, return unchanged.
-  if (query.includes(clause)) return query;
-  return `${query.trim()} ${clause}`;
+  const m = /^\s*(\{)([^}]*)(\})(.*)$/s.exec(query);
+  if (!m) {
+    // No selector at all — prepend one.
+    return `{${label}${op}"${escaped}"} ${query.trim()}`.trim();
+  }
+  const open = m[1]!;
+  const body = m[2]!;
+  const close = m[3]!;
+  const rest = m[4] ?? '';
+
+  // Look for existing clause for this label with `=` (the common case).
+  const eqRe = new RegExp(
+    String.raw`(^|,\s*)${escapeRegex(label)}\s*=\s*"([^"\\]*(?:\\.[^"\\]*)*)"`,
+  );
+  const eqMatch = eqRe.exec(body);
+  if (eqMatch && op === '=') {
+    const existing = eqMatch[2]!;
+    if (existing === escaped) return query; // already present
+    // Convert to regex union =~"a|b"
+    const joined = `${existing}|${escaped}`;
+    const newBody = body.replace(
+      eqRe,
+      `$1${label}=~"${joined}"`,
+    );
+    return `${open}${newBody}${close}${rest}`;
+  }
+
+  const clause = `${label}${op}"${escaped}"`;
+  const newBody =
+    body.trim() === '' ? clause : `${body.replace(/\s*$/, '')}, ${clause}`;
+  return `${open}${newBody}${close}${rest}`;
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function useMirrorDatasource(
@@ -220,16 +317,14 @@ function useMirrorDatasource(
   actualId: string,
   setTo: (id: string) => void,
 ) {
-  // When the active datasource changes in the top bar, reflect it in URL.
   if (current !== actualId) {
-    // Defer to avoid setState during render
     queueMicrotask(() => setTo(actualId));
   }
 }
 
 function EmptyState({ children }: { children: React.ReactNode }) {
   return (
-    <div className="h-full grid place-items-center text-sm text-muted-foreground text-center px-6 py-12">
+    <div className="flex-1 grid place-items-center text-sm text-muted-foreground text-center px-6 py-12">
       <div>{children}</div>
     </div>
   );
