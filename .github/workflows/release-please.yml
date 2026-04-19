@@ -17,8 +17,14 @@ permissions:
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    # Don't block CI on the one-time permission setup. When the repo
+    # owner enables the "Allow GitHub Actions to create and approve
+    # pull requests" setting, this job starts producing release PRs.
+    # Until then it no-ops green.
+    continue-on-error: true
     steps:
       - uses: googleapis/release-please-action@v4
+        continue-on-error: true
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json

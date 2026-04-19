@@ -36,7 +36,7 @@ export interface DatasourceState {
 
 const LS_KEY = 'loki-ui:datasources';
 const SCHEMA_KEY = 'loki-ui:schemaVersion';
-const CURRENT_SCHEMA: 1 = 1;
+const CURRENT_SCHEMA = 1 as const;
 const CHANGED_EVENT = 'loki-ui:datasources-changed';
 
 const ephemeralCreds = new Map<string, Credentials>();
@@ -78,7 +78,7 @@ function parseState(): DatasourceState {
  * step here that reads the previous shape and writes the new one.
  */
 export function migrate(): void {
-  let stored: number | null = null;
+  let stored: number | null;
   try {
     const raw = localStorage.getItem(SCHEMA_KEY);
     stored = raw ? Number(raw) : null;

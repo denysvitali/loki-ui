@@ -1,0 +1,12 @@
+[
+  {
+    "name": "Initial bundle (gzipped)",
+    "path": "dist/assets/index-*.js",
+    "limit": "400 KB"
+  },
+  {
+    "name": "Stylesheet (gzipped)",
+    "path": "dist/assets/index-*.css",
+    "limit": "20 KB"
+  }
+]

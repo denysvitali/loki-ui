@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import { EditorState, Prec } from '@codemirror/state';
 import {
   EditorView,
@@ -45,7 +45,9 @@ export function LogQLEditor({
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const handlersRef = useRef({ onRun, onHistoryOpen, onUpOnEmpty });
-  handlersRef.current = { onRun, onHistoryOpen, onUpOnEmpty };
+  useLayoutEffect(() => {
+    handlersRef.current = { onRun, onHistoryOpen, onUpOnEmpty };
+  });
 
   useEffect(() => {
     if (!hostRef.current) return;

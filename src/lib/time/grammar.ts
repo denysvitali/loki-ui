@@ -90,7 +90,7 @@ function relativeToNs(raw: string, now: Date, timeZone: string): bigint {
 
   let date = new Date(now.getTime());
 
-  const opRe = /^([-+\/])/;
+  const opRe = /^([-+/])/;
   const offRe = /^(\d+)([smhdwMy])/;
   const snapRe = /^([smhdwMy])/;
 

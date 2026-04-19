@@ -290,9 +290,11 @@ interface TierOptionProps {
 }
 
 function TierOption({ value, current, onChange, label, hint }: TierOptionProps) {
+  const id = `tier-${value}`;
   return (
-    <label className="flex items-start gap-2 cursor-pointer">
+    <div className="flex items-start gap-2">
       <input
+        id={id}
         type="radio"
         name="tier"
         value={value}
@@ -300,11 +302,11 @@ function TierOption({ value, current, onChange, label, hint }: TierOptionProps) 
         onChange={() => onChange(value)}
         className="mt-0.5"
       />
-      <span>
+      <label htmlFor={id} className="cursor-pointer">
         <span className="text-foreground">{label}</span>
         <span className="block text-subtle-foreground text-xs">{hint}</span>
-      </span>
-    </label>
+      </label>
+    </div>
   );
 }
 

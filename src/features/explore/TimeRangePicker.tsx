@@ -90,8 +90,11 @@ export function TimeRangePicker({ from, to, onChange }: TimeRangePickerProps) {
         <div className="absolute left-0 mt-2 w-[28rem] max-w-[calc(100vw-2rem)] rounded-md border border-border bg-card shadow-xl z-50 p-4 space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div className="grid gap-1.5">
-              <label className="text-xs text-muted-foreground">From</label>
+              <label htmlFor="tr-from" className="text-xs text-muted-foreground">
+                From
+              </label>
               <input
+                id="tr-from"
                 value={draftFrom}
                 onChange={(e) => setDraftFrom(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && apply()}
@@ -100,8 +103,11 @@ export function TimeRangePicker({ from, to, onChange }: TimeRangePickerProps) {
               />
             </div>
             <div className="grid gap-1.5">
-              <label className="text-xs text-muted-foreground">To</label>
+              <label htmlFor="tr-to" className="text-xs text-muted-foreground">
+                To
+              </label>
               <input
+                id="tr-to"
                 value={draftTo}
                 onChange={(e) => setDraftTo(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && apply()}
