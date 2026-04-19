@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { LokiStats, Stream, StreamValue } from '@/lib/loki';
-import { parseStructured } from '@/lib/parse/structured';
+import { parseStructured, type ParsedStructured } from '@/lib/parse/structured';
 
 interface LogRow {
   ts: string; // ns epoch as string
@@ -9,6 +9,7 @@ interface LogRow {
   labels: Record<string, string>;
   metadata?: Record<string, string>;
   level: Level;
+  parsed: ParsedStructured | null;
 }
 
 export type Level = 'error' | 'warn' | 'info' | 'debug' | 'none';
@@ -161,7 +162,7 @@ function LogRowView({
               : 'whitespace-pre overflow-hidden text-ellipsis')
           }
         >
-          {expanded ? row.line : row.line.slice(0, 1000)}
+          <HighlightedLine parsed={row.parsed} expanded={expanded} line={row.line} />
         </span>
       </div>
       {expanded && (
@@ -181,7 +182,7 @@ function LogRowView({
               tone="accent"
             />
           )}
-          <ParsedFields line={row.line} onFilterByField={onFilterByField} />
+          <ParsedFields parsed={row.parsed} onFilterByField={onFilterByField} />
           <CopyActions row={row} onOpenContext={onOpenContext} />
         </div>
       )}
@@ -228,13 +229,12 @@ function FieldTree({
 }
 
 function ParsedFields({
-  line,
+  parsed,
   onFilterByField,
 }: {
-  line: string;
+  parsed: ParsedStructured | null;
   onFilterByField?: (label: string, value: string) => void;
 }) {
-  const parsed = useMemo(() => parseStructured(line), [line]);
   if (!parsed) return null;
   return (
     <div>
@@ -336,6 +336,110 @@ function Stats({ stats }: { stats: LokiStats }) {
   );
 }
 
+function HighlightedLine({
+  parsed,
+  expanded,
+  line,
+}: {
+  parsed: ParsedStructured | null;
+  expanded: boolean;
+  line: string;
+}) {
+  const text = expanded ? line : line.slice(0, 1000);
+  if (!parsed) return <>{text}</>;
+
+  if (parsed.format === 'logfmt') return <LogfmtHighlight fields={parsed.fields} />;
+  if (parsed.format === 'tabular')
+    return <TabularHighlight fields={parsed.fields} />;
+  return <>{text}</>;
+}
+
+const LOGFMT_META_KEYS = new Set(['time', 'ts', 'timestamp', 'level', 'lvl', 'severity']);
+const LOGFMT_MSG_KEYS = new Set(['msg', 'message']);
+
+function LogfmtHighlight({
+  fields,
+}: {
+  fields: Record<string, string | number | boolean | null>;
+}) {
+  const entries = Object.entries(fields);
+  // Show msg/message first, then other fields, meta keys (time/level) last
+  const sorted = entries.sort(([a], [b]) => {
+    const aM = LOGFMT_MSG_KEYS.has(a) ? 0 : LOGFMT_META_KEYS.has(a) ? 2 : 1;
+    const bM = LOGFMT_MSG_KEYS.has(b) ? 0 : LOGFMT_META_KEYS.has(b) ? 2 : 1;
+    return aM - bM;
+  });
+
+  return (
+    <>
+      {sorted.map(([key, raw], i) => {
+        const val = String(raw);
+        const isMsg = LOGFMT_MSG_KEYS.has(key);
+        const isMeta = LOGFMT_META_KEYS.has(key);
+        const needsQuote = val.includes(' ');
+        return (
+          <span key={key}>
+            {i > 0 && ' '}
+            <span className={isMeta ? 'text-subtle-foreground/60' : 'text-muted-foreground'}>
+              {key}
+            </span>
+            <span className="text-subtle-foreground">=</span>
+            <span
+              className={
+                isMsg
+                  ? 'text-foreground font-medium'
+                  : isMeta
+                    ? 'text-subtle-foreground/60'
+                    : ''
+              }
+            >
+              {needsQuote ? `"${val}"` : val}
+            </span>
+          </span>
+        );
+      })}
+    </>
+  );
+}
+
+function TabularHighlight({
+  fields,
+}: {
+  fields: Record<string, string | number | boolean | null>;
+}) {
+  const logger = fields.logger != null ? String(fields.logger) : '';
+  const msg = fields.msg != null ? String(fields.msg) : '';
+  const rest = Object.entries(fields).filter(
+    ([k]) => k !== 'logger' && k !== 'msg',
+  );
+
+  return (
+    <>
+      {logger && (
+        <span className="text-accent font-medium">{logger}</span>
+      )}
+      {logger && msg && ' '}
+      {msg && <span className="text-foreground">{msg}</span>}
+      {rest.length > 0 && (
+        <span className="text-muted-foreground">
+          {' '}
+          {rest.map(([key, raw]) => {
+            const val = String(raw);
+            return (
+              <span key={key}>
+                {' '}
+                <span>{key}</span>
+                <span>=</span>
+                <span className="text-subtle-foreground">{val}</span>
+              </span>
+            );
+          })}
+        </span>
+      )}
+    </>
+  );
+}
+
 function LevelBadge({ level }: { level: Level }) {
   const colors: Record<Level, string> = {
     error: 'var(--color-level-error)',
@@ -377,6 +481,7 @@ function flattenStreams(streams: Stream[]): LogRow[] {
         labels: s.stream,
         ...(metadata ? { metadata } : {}),
         level: detectLevel(s.stream, line),
+        parsed: parseStructured(line),
       });
     }
   }

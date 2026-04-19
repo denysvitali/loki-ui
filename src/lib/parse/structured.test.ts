@@ -59,3 +59,37 @@ describe('parseStructured — logfmt detection', () => {
     expect(parseStructured('foo=1')).toBeNull();
   });
 });
+
+describe('parseStructured — tabular detection', () => {
+  it('parses tab-separated slog-style line with JSON', () => {
+    const r = parseStructured(
+      '2026-04-19T17:54:51Z\tINFO\tAutoscalingRunnerSet\tFind existing ephemeral runner set\t{"version": "0.14.1", "name": "k2-gitops-9qcmq"}',
+    );
+    expect(r?.format).toBe('tabular');
+    expect(r?.fields.logger).toBe('AutoscalingRunnerSet');
+    expect(r?.fields.msg).toBe('Find existing ephemeral runner set');
+    expect(r?.fields.version).toBe('0.14.1');
+    expect(r?.fields.name).toBe('k2-gitops-9qcmq');
+  });
+
+  it('parses tab-separated line without JSON', () => {
+    const r = parseStructured(
+      '2026-04-19T17:54:51Z\tINFO\tAutoscalingRunnerSet\tFind existing ephemeral runner set',
+    );
+    expect(r?.format).toBe('tabular');
+    expect(r?.fields.logger).toBe('AutoscalingRunnerSet');
+    expect(r?.fields.msg).toBe('Find existing ephemeral runner set');
+  });
+
+  it('rejects lines without tabs', () => {
+    expect(parseStructured('2026-04-19T17:54:51Z INFO AutoscalingRunnerSet message')).toBeNull();
+  });
+
+  it('rejects lines where first field is not a timestamp', () => {
+    expect(parseStructured('hello\tINFO\tLogger\tmessage')).toBeNull();
+  });
+
+  it('rejects lines where second field is not a level', () => {
+    expect(parseStructured('2026-04-19T17:54:51Z\tUNKNOWN\tLogger\tmessage')).toBeNull();
+  });
+});

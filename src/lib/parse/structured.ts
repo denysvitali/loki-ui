@@ -4,7 +4,7 @@
  */
 
 export interface ParsedStructured {
-  format: 'json' | 'logfmt';
+  format: 'json' | 'logfmt' | 'tabular';
   fields: Record<string, string | number | boolean | null>;
 }
 
@@ -24,6 +24,9 @@ export function parseStructured(line: string): ParsedStructured | null {
       /* fall through */
     }
   }
+  const tabular = parseTabular(line);
+  if (tabular) return tabular;
+
   const lf = parseLogfmt(line);
   if (lf && Object.keys(lf).length >= 2) return { format: 'logfmt', fields: lf };
   return null;
@@ -45,6 +48,57 @@ function flattenValue(v: unknown): string | number | boolean | null {
  * Minimal logfmt parser: `key=value key="quoted value" key=bare_ident`.
  * Not exhaustive; good enough for the common Go / Promtail output.
  */
+
+/**
+ * Parse tab-separated structured logs: `TS\tLEVEL\tLOGGER\tMSG\t{JSON?}`.
+ * Common with Go slog, Zap, and Kubernetes controller-runtime loggers.
+ */
+function parseTabular(line: string): ParsedStructured | null {
+  const parts = line.split('\t');
+  if (parts.length < 4) return null;
+
+  const [ts, level, logger, ...rest] = parts;
+  if (!/^\d{4}-\d{2}-\d{2}T/.test(ts)) return null;
+  if (!/^(trace|debug|info|warn(ing)?|error|fatal|panic|critical)$/i.test(level))
+    return null;
+
+  const messageAndJson = rest.join('\t');
+  let message = messageAndJson;
+  const fields: ParsedStructured['fields'] = {};
+
+  // Detect trailing JSON object
+  const lastBrace = messageAndJson.lastIndexOf('}');
+  if (lastBrace !== -1) {
+    let depth = 0;
+    let jsonStart = -1;
+    for (let i = lastBrace; i >= 0; i--) {
+      if (messageAndJson[i] === '}') depth++;
+      if (messageAndJson[i] === '{') depth--;
+      if (depth === 0) {
+        jsonStart = i;
+        break;
+      }
+    }
+    if (jsonStart > 0) {
+      try {
+        const obj = JSON.parse(messageAndJson.slice(jsonStart)) as unknown;
+        if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+          for (const [k, v] of Object.entries(obj))
+            fields[k] = flattenValue(v);
+          message = messageAndJson.slice(0, jsonStart).trim();
+        }
+      } catch {
+        /* not valid JSON */
+      }
+    }
+  }
+
+  fields.logger = logger;
+  fields.msg = message;
+
+  return { format: 'tabular', fields };
+}
+
 export function parseLogfmt(line: string): Record<string, string> | null {
   const out: Record<string, string> = {};
   let i = 0;
