@@ -1,15 +1,100 @@
 @import 'tailwindcss';
 
+/*
+ * Single source of truth for colors. Token names follow the shadcn convention
+ * so we can adopt shadcn components later without renaming variables.
+ * Components read from the Tailwind bg-* / text-* / border-* mapping generated
+ * from `@theme` below — they do NOT use Tailwind's `dark:` variant.
+ */
+
+:root[data-theme='dark'],
+:root:not([data-theme]) {
+  --color-background: #09090b;
+  --color-card: #111114;
+  --color-muted: #17171b;
+  --color-border: #26262c;
+  --color-input: #26262c;
+  --color-foreground: #fafafa;
+  --color-muted-foreground: #a1a1aa;
+  --color-subtle-foreground: #71717a;
+  --color-accent: #2dd4bf;
+  --color-accent-foreground: #04171a;
+  --color-ring: #5eead4;
+
+  /* Okabe-Ito-inspired, CVD-safe level palette */
+  --color-level-info: #4fc3dc;
+  --color-level-warn: #f0b429;
+  --color-level-error: #e05a3c;
+  --color-level-debug: #8a8a92;
+}
+
+:root[data-theme='light'] {
+  --color-background: #ffffff;
+  --color-card: #f7f7f8;
+  --color-muted: #efeff1;
+  --color-border: #e4e4e7;
+  --color-input: #d4d4d8;
+  --color-foreground: #18181b;
+  --color-muted-foreground: #52525b;
+  --color-subtle-foreground: #71717a;
+  --color-accent: #0d9488;
+  --color-accent-foreground: #ffffff;
+  --color-ring: #14b8a6;
+
+  --color-level-info: #2b9eb8;
+  --color-level-warn: #b36a05;
+  --color-level-error: #b1412a;
+  --color-level-debug: #5a5a62;
+}
+
+@theme {
+  --color-background: var(--color-background);
+  --color-card: var(--color-card);
+  --color-muted: var(--color-muted);
+  --color-border: var(--color-border);
+  --color-input: var(--color-input);
+  --color-foreground: var(--color-foreground);
+  --color-muted-foreground: var(--color-muted-foreground);
+  --color-subtle-foreground: var(--color-subtle-foreground);
+  --color-accent: var(--color-accent);
+  --color-accent-foreground: var(--color-accent-foreground);
+  --color-ring: var(--color-ring);
+  --color-level-info: var(--color-level-info);
+  --color-level-warn: var(--color-level-warn);
+  --color-level-error: var(--color-level-error);
+  --color-level-debug: var(--color-level-debug);
+
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Inter,
+    sans-serif;
+  --font-mono:
+    ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+}
+
 @layer base {
+  :root {
+    color-scheme: dark light;
+  }
+
+  html,
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+  }
+
   html {
-    font-family:
-      ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Inter,
-      sans-serif;
+    font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
 
-  :root {
-    color-scheme: dark light;
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  ::selection {
+    background-color: color-mix(in oklab, var(--color-accent) 40%, transparent);
   }
 }

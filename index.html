@@ -10,8 +10,28 @@
       content="A better frontend for Grafana Loki. Static SPA, no backend."
     />
     <title>loki-ui</title>
+    <script>
+      // FOUC prevention: apply theme before first paint
+      (function () {
+        try {
+          var stored = localStorage.getItem('loki-ui:theme');
+          var prefersDark = window.matchMedia(
+            '(prefers-color-scheme: dark)',
+          ).matches;
+          var theme =
+            stored === 'light' || stored === 'dark'
+              ? stored
+              : prefersDark
+                ? 'dark'
+                : 'light';
+          document.documentElement.setAttribute('data-theme', theme);
+        } catch (_) {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
+    </script>
   </head>
-  <body class="bg-zinc-950 text-zinc-100">
+  <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
