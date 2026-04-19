@@ -1,0 +1,43 @@
+# CORS-enabling reverse proxy for loki-ui.
+#
+# loki-ui is a static SPA served from a different origin than your Loki.
+# Loki itself doesn't emit CORS headers, so a proxy in front is required.
+#
+# This Caddyfile forwards every loki-ui-supported endpoint to Loki and
+# adds the headers the browser needs. Drop into examples/Caddyfile and run:
+#
+#   caddy run --config examples/Caddyfile
+#
+# The dev docker-compose in examples/docker-compose.dev.yml uses this
+# same file.
+
+:3101 {
+	# Upstream Loki — override with the LOKI_UPSTREAM env var.
+	reverse_proxy {$LOKI_UPSTREAM:http://loki:3100} {
+		# WebSocket support for /loki/api/v1/tail
+		flush_interval -1
+	}
+
+	# Allow any origin (you can tighten this to your deployed loki-ui URL).
+	# The browser sends an OPTIONS preflight on every cross-origin request
+	# with custom headers or non-GET/HEAD/POST methods — respond 204 with
+	# the appropriate allow-list.
+	@options method OPTIONS
+	handle @options {
+		header {
+			Access-Control-Allow-Origin {http.request.header.Origin}
+			Access-Control-Allow-Methods "GET, POST, OPTIONS, DELETE"
+			Access-Control-Allow-Headers "Authorization, Content-Type, X-Scope-OrgID, Accept"
+			Access-Control-Max-Age 600
+			Vary Origin
+		}
+		respond 204
+	}
+
+	# For the real responses, echo CORS headers alongside Loki's own.
+	header {
+		Access-Control-Allow-Origin {http.request.header.Origin}
+		Access-Control-Expose-Headers "Retry-After"
+		Vary Origin
+	}
+}

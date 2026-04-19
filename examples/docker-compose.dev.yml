@@ -1,0 +1,45 @@
+# Dev stack for loki-ui contributors.
+#
+# Brings up:
+#   - grafana/loki (port 3100, internal)
+#   - caddy with the CORS-enabling config from examples/Caddyfile
+#     (exposed on host port 3101 — point loki-ui there)
+#   - grafana/loki-canary generating synthetic, labelled log entries
+#
+# Run:
+#   docker compose -f examples/docker-compose.dev.yml up -d
+#   pnpm install && pnpm dev
+#   # Open http://localhost:5173, connect to http://localhost:3101, no auth
+
+services:
+  loki:
+    image: grafana/loki:3.5
+    command: -config.file=/etc/loki/local-config.yaml
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '--spider', 'http://localhost:3100/ready']
+      interval: 5s
+      retries: 10
+
+  caddy:
+    image: caddy:2
+    command: caddy run --config /etc/caddy/Caddyfile
+    environment:
+      LOKI_UPSTREAM: http://loki:3100
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    ports:
+      - '3101:3101'
+    depends_on:
+      loki:
+        condition: service_healthy
+
+  canary:
+    image: grafana/loki-canary:3.5
+    command:
+      - '-addr=loki:3100'
+      - '-labelvalue=dev'
+      - '-interval=1s'
+      - '-size=200'
+    depends_on:
+      loki:
+        condition: service_healthy

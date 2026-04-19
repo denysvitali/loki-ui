@@ -1,0 +1,33 @@
+# Production-shape self-hosting recipe: Loki + CORS-enabling Caddy.
+#
+# Copy this into your own deployment directory, edit the Loki config /
+# storage backend to taste, and point loki-ui at http://<host>:3101.
+
+services:
+  loki:
+    image: grafana/loki:3.5
+    restart: unless-stopped
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki-data:/loki
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '--spider', 'http://localhost:3100/ready']
+      interval: 10s
+      retries: 10
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    command: caddy run --config /etc/caddy/Caddyfile
+    environment:
+      LOKI_UPSTREAM: http://loki:3100
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    ports:
+      - '3101:3101'
+    depends_on:
+      loki:
+        condition: service_healthy
+
+volumes:
+  loki-data:

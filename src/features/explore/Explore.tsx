@@ -14,6 +14,7 @@ import { LabelBrowser } from '@/features/labels/LabelBrowser';
 import { canTail, useTail } from '@/features/tail/useTail';
 import { ContextPanel, type ContextAnchor } from '@/features/context/ContextPanel';
 import { HistoryPopover } from '@/features/history/HistoryPopover';
+import { StreamsExportMenu } from '@/features/export/ExportMenu';
 import { TimeRangePicker } from './TimeRangePicker';
 import { LogList } from './LogList';
 import { Histogram } from './Histogram';
@@ -409,23 +410,34 @@ export function Explore({ ds }: ExploreProps) {
                         }
                         onOpenContext={(anchor) => setCtxAnchor(anchor)}
                       />
-                      {hitLimit && (
-                        <div className="flex-shrink-0 border-t border-border px-3 py-2 flex items-center justify-between gap-3 bg-card/40">
-                          <span className="text-xs text-muted-foreground">
-                            showing {totalEntries.toLocaleString()}{' '}
-                            {totalEntries === 1 ? 'entry' : 'entries'} — more
-                            may exist
-                          </span>
-                          <button
-                            type="button"
-                            disabled={loadingOlder}
-                            onClick={loadOlder}
-                            className="h-7 px-3 rounded-md text-xs font-medium bg-background border border-border text-foreground hover:bg-muted disabled:opacity-50"
-                          >
-                            {loadingOlder ? 'Loading…' : 'Load older'}
-                          </button>
+                      <div className="flex-shrink-0 border-t border-border px-3 py-2 flex items-center justify-between gap-3 bg-card/40">
+                        <span className="text-xs text-muted-foreground">
+                          {hitLimit
+                            ? `showing ${totalEntries.toLocaleString()} ${totalEntries === 1 ? 'entry' : 'entries'} — more may exist`
+                            : `${totalEntries.toLocaleString()} ${totalEntries === 1 ? 'entry' : 'entries'}`}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <StreamsExportMenu
+                            streams={merged}
+                            ctx={{
+                              datasourceName: ds.name,
+                              query: pane.query,
+                              from: pane.from,
+                              to: pane.to,
+                            }}
+                          />
+                          {hitLimit && (
+                            <button
+                              type="button"
+                              disabled={loadingOlder}
+                              onClick={loadOlder}
+                              className="h-7 px-3 rounded-md text-xs font-medium bg-background border border-border text-foreground hover:bg-muted disabled:opacity-50"
+                            >
+                              {loadingOlder ? 'Loading…' : 'Load older'}
+                            </button>
+                          )}
                         </div>
-                      )}
+                      </div>
                     </>
                   )}
                 </div>
