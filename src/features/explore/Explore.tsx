@@ -15,6 +15,7 @@ import { canTail, useTail } from '@/features/tail/useTail';
 import { ContextPanel, type ContextAnchor } from '@/features/context/ContextPanel';
 import { HistoryPopover } from '@/features/history/HistoryPopover';
 import { StreamsExportMenu } from '@/features/export/ExportMenu';
+import { LogQLEditor } from './LogQLEditor';
 import { TimeRangePicker } from './TimeRangePicker';
 import { LogList } from './LogList';
 import { Histogram } from './Histogram';
@@ -262,32 +263,13 @@ export function Explore({ ds }: ExploreProps) {
           onSubmit={onRun}
           className="relative border-b border-border bg-card/40 p-3 space-y-2 flex-shrink-0"
         >
-          <textarea
+          <LogQLEditor
             value={draftQuery}
-            onChange={(e) => setDraftQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-                e.preventDefault();
-                onRun();
-                return;
-              }
-              if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'h') {
-                e.preventDefault();
-                setHistoryOpen(true);
-                return;
-              }
-              if (
-                e.key === 'ArrowUp' &&
-                (e.currentTarget.value === '' || !e.currentTarget.value.trim())
-              ) {
-                e.preventDefault();
-                setHistoryOpen(true);
-              }
-            }}
+            onChange={setDraftQuery}
+            onRun={() => onRun()}
+            onHistoryOpen={() => setHistoryOpen(true)}
+            onUpOnEmpty={() => setHistoryOpen(true)}
             placeholder='{app="foo"} |= "error"'
-            rows={2}
-            spellCheck={false}
-            className="w-full px-3 py-2 rounded-md bg-background border border-input font-mono text-sm text-foreground placeholder:text-subtle-foreground focus:border-ring focus:outline-none resize-y"
           />
           {historyOpen && (
             <HistoryPopover

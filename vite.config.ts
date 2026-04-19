@@ -15,4 +15,10 @@ export default defineConfig({
     host: true,
     port: 5173,
   },
+  build: {
+    // 222 KB gzipped is fine for v0.1; the Vite warning fires on the
+    // minified (pre-gzip) size. Our actual budget (PLAN §2.2) is 400 KB
+    // gzipped initial, which we're well under.
+    chunkSizeWarningLimit: 900,
+  },
 });
