@@ -41,6 +41,36 @@ const CHANGED_EVENT = 'loki-ui:datasources-changed';
 
 const ephemeralCreds = new Map<string, Credentials>();
 
+/**
+ * Cached snapshot of the stored state. useSyncExternalStore requires
+ * getSnapshot() to return a stable reference when nothing changed,
+ * otherwise the component loops (React #185). We parse lazily on read
+ * and invalidate via `invalidateSnapshot()` on every mutation or
+ * cross-tab storage event.
+ */
+let snapshot: DatasourceState | null = null;
+
+function invalidateSnapshot(): void {
+  snapshot = null;
+}
+
+function getSnapshot(): DatasourceState {
+  if (snapshot === null) snapshot = parseState();
+  return snapshot;
+}
+
+function parseState(): DatasourceState {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return empty();
+    const parsed = JSON.parse(raw) as DatasourceState;
+    if (parsed.schemaVersion !== CURRENT_SCHEMA) return empty();
+    return parsed;
+  } catch {
+    return empty();
+  }
+}
+
 // ----- schema migration scaffold -----------------------------------------
 
 /**
@@ -67,15 +97,7 @@ export function migrate(): void {
 // ----- metadata CRUD ------------------------------------------------------
 
 export function readState(): DatasourceState {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return empty();
-    const parsed = JSON.parse(raw) as DatasourceState;
-    if (parsed.schemaVersion !== CURRENT_SCHEMA) return empty();
-    return parsed;
-  } catch {
-    return empty();
-  }
+  return getSnapshot();
 }
 
 function empty(): DatasourceState {
@@ -83,6 +105,7 @@ function empty(): DatasourceState {
 }
 
 function writeState(state: DatasourceState): void {
+  snapshot = state;
   try {
     localStorage.setItem(LS_KEY, JSON.stringify(state));
   } catch {
@@ -92,11 +115,11 @@ function writeState(state: DatasourceState): void {
 }
 
 export function listDatasources(): StoredDatasource[] {
-  return readState().datasources;
+  return getSnapshot().datasources;
 }
 
 export function getActiveDatasource(): StoredDatasource | null {
-  const s = readState();
+  const s = getSnapshot();
   if (!s.activeId) return null;
   return s.datasources.find((d) => d.id === s.activeId) ?? null;
 }
@@ -107,10 +130,13 @@ export function addDatasource(
 ): StoredDatasource {
   const id = generateId();
   const ds: StoredDatasource = { ...input, id };
-  const s = readState();
-  s.datasources.push(ds);
-  s.activeId = id;
-  writeState(s);
+  const s = getSnapshot();
+  const next: DatasourceState = {
+    ...s,
+    datasources: [...s.datasources, ds],
+    activeId: id,
+  };
+  writeState(next);
   storeCredentials(id, ds.credentialTier, creds);
   return ds;
 }
@@ -120,36 +146,40 @@ export function updateDatasource(
   patch: Partial<Omit<StoredDatasource, 'id'>>,
   creds?: Credentials,
 ): StoredDatasource | null {
-  const s = readState();
+  const s = getSnapshot();
   const i = s.datasources.findIndex((d) => d.id === id);
   if (i < 0) return null;
   const prev = s.datasources[i]!;
-  const next: StoredDatasource = { ...prev, ...patch };
-  s.datasources[i] = next;
-  writeState(s);
+  const nextDs: StoredDatasource = { ...prev, ...patch };
+  const next: DatasourceState = {
+    ...s,
+    datasources: s.datasources.map((d, idx) => (idx === i ? nextDs : d)),
+  };
+  writeState(next);
   if (creds) {
-    // Clear old-tier creds if the tier changed.
     if (patch.credentialTier && patch.credentialTier !== prev.credentialTier) {
       clearCredentialsFromTier(id, prev.credentialTier);
     }
-    storeCredentials(id, next.credentialTier, creds);
+    storeCredentials(id, nextDs.credentialTier, creds);
   }
-  return next;
+  return nextDs;
 }
 
 export function removeDatasource(id: string): void {
-  const s = readState();
-  s.datasources = s.datasources.filter((d) => d.id !== id);
-  if (s.activeId === id) s.activeId = s.datasources[0]?.id ?? null;
-  writeState(s);
+  const s = getSnapshot();
+  const datasources = s.datasources.filter((d) => d.id !== id);
+  const activeId =
+    s.activeId === id ? (datasources[0]?.id ?? null) : s.activeId;
+  const next: DatasourceState = { ...s, datasources, activeId };
+  writeState(next);
   clearAllCredentials(id);
 }
 
 export function setActiveDatasource(id: string | null): void {
-  const s = readState();
+  const s = getSnapshot();
   if (id !== null && !s.datasources.some((d) => d.id === id)) return;
-  s.activeId = id;
-  writeState(s);
+  if (s.activeId === id) return;
+  writeState({ ...s, activeId: id });
 }
 
 // ----- credential tiers ---------------------------------------------------
@@ -277,9 +307,17 @@ function notify(): void {
  */
 export function subscribe(listener: () => void): () => void {
   if (typeof window === 'undefined') return () => {};
+  // Same-tab mutations already updated the cached snapshot in writeState();
+  // we only need to notify listeners. Cross-tab changes come through
+  // StorageEvent, where the cache IS stale and must be invalidated.
   const onCustom = () => listener();
   const onStorage = (e: StorageEvent) => {
-    if (e.key === LS_KEY || e.key === SCHEMA_KEY || e.key?.startsWith('loki-ui:creds:')) {
+    if (
+      e.key === LS_KEY ||
+      e.key === SCHEMA_KEY ||
+      e.key?.startsWith('loki-ui:creds:')
+    ) {
+      invalidateSnapshot();
       listener();
     }
   };
@@ -303,6 +341,7 @@ function generateId(): string {
 /** Test-only: reset all state. Not exported from index.ts. */
 export function __resetForTests(): void {
   ephemeralCreds.clear();
+  invalidateSnapshot();
   try {
     localStorage.clear();
     sessionStorage.clear();

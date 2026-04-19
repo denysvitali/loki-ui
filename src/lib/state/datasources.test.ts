@@ -29,6 +29,61 @@ describe('migrate', () => {
   });
 });
 
+describe('snapshot reference stability (regression: React #185)', () => {
+  it('listDatasources returns the same reference across reads when unchanged', () => {
+    const a = listDatasources();
+    const b = listDatasources();
+    expect(a).toBe(b);
+  });
+
+  it('getActiveDatasource returns the same reference across reads when unchanged', () => {
+    const ds = addDatasource(
+      {
+        name: 'd',
+        url: 'http://d',
+        authType: 'none',
+        credentialTier: 'ephemeral',
+      },
+      {},
+    );
+    const a = getActiveDatasource();
+    const b = getActiveDatasource();
+    expect(a).toBe(b);
+    expect(a?.id).toBe(ds.id);
+  });
+
+  it('listDatasources reference changes on addDatasource', () => {
+    const a = listDatasources();
+    addDatasource(
+      {
+        name: 'd',
+        url: 'http://d',
+        authType: 'none',
+        credentialTier: 'ephemeral',
+      },
+      {},
+    );
+    const b = listDatasources();
+    expect(a).not.toBe(b);
+  });
+
+  it('setActiveDatasource to the current id is a no-op and keeps reference', () => {
+    const ds = addDatasource(
+      {
+        name: 'd',
+        url: 'http://d',
+        authType: 'none',
+        credentialTier: 'ephemeral',
+      },
+      {},
+    );
+    const a = listDatasources();
+    setActiveDatasource(ds.id); // already active
+    const b = listDatasources();
+    expect(a).toBe(b);
+  });
+});
+
 describe('datasource CRUD', () => {
   it('starts empty', () => {
     expect(listDatasources()).toEqual([]);
