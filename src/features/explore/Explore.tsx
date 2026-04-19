@@ -10,6 +10,8 @@ import {
 import { useUrlState } from '@/lib/state/useUrlState';
 import { resolveRange, browserTimeZone } from '@/lib/time/grammar';
 import { LabelBrowser } from '@/features/labels/LabelBrowser';
+import { canTail, useTail } from '@/features/tail/useTail';
+import { ContextPanel, type ContextAnchor } from '@/features/context/ContextPanel';
 import { TimeRangePicker } from './TimeRangePicker';
 import { LogList } from './LogList';
 import { Histogram } from './Histogram';
@@ -103,6 +105,16 @@ export function Explore({ ds }: ExploreProps) {
 
   const selector = extractSelector(draftQuery || pane.query);
 
+  const live = urlState.live;
+  const tail = useTail({
+    ds: toDatasource(ds),
+    creds: loadCredentials(ds.id, ds.credentialTier),
+    query: pane.query,
+    enabled: live && Boolean(pane.query.trim()),
+  });
+
+  const [ctxAnchor, setCtxAnchor] = useState<ContextAnchor | null>(null);
+
   const handleInsertLabel = (
     label: string,
     value: string,
@@ -179,6 +191,13 @@ export function Explore({ ds }: ExploreProps) {
               value={urlState.limit}
               onChange={(limit) => updateUrl((s) => ({ ...s, limit }))}
             />
+            <TailToggle
+              ds={ds}
+              enabled={live}
+              onToggle={(v) => updateUrl((s) => ({ ...s, live: v }))}
+              status={tail.status}
+              droppedEntries={tail.droppedEntries}
+            />
             <button
               type="submit"
               className="h-8 px-4 rounded-md text-sm font-medium bg-accent text-accent-foreground hover:opacity-90 transition-opacity"
@@ -207,7 +226,25 @@ export function Explore({ ds }: ExploreProps) {
             </div>
           )}
 
-          {result.data && result.data.data.resultType === 'streams' && (
+          {live && tail.streams.length > 0 && (
+            <div className="flex-1 min-h-0">
+              <LogList
+                streams={tail.streams}
+                wrap={urlState.wrap}
+                onToggleWrap={() => updateUrl((s) => ({ ...s, wrap: !s.wrap }))}
+                onFilterByField={(label, value) =>
+                  handleInsertLabel(label, value, '=')
+                }
+                onOpenContext={(anchor) => setCtxAnchor(anchor)}
+              />
+            </div>
+          )}
+
+          {live && tail.streams.length === 0 && tail.status === 'open' && (
+            <EmptyState>Waiting for new entries…</EmptyState>
+          )}
+
+          {!live && result.data && result.data.data.resultType === 'streams' && (
             <>
               {queryRange && (
                 <Histogram
@@ -234,6 +271,7 @@ export function Explore({ ds }: ExploreProps) {
                     onFilterByField={(label, value) =>
                       handleInsertLabel(label, value, '=')
                     }
+                    onOpenContext={(anchor) => setCtxAnchor(anchor)}
                   />
                 )}
               </div>
@@ -250,7 +288,72 @@ export function Explore({ ds }: ExploreProps) {
             )}
         </div>
       </div>
+
+      {ctxAnchor && (
+        <ContextPanel
+          ds={ds}
+          anchor={ctxAnchor}
+          onClose={() => setCtxAnchor(null)}
+        />
+      )}
     </div>
+  );
+}
+
+function TailToggle({
+  ds,
+  enabled,
+  onToggle,
+  status,
+  droppedEntries,
+}: {
+  ds: StoredDatasource;
+  enabled: boolean;
+  onToggle: (v: boolean) => void;
+  status: ReturnType<typeof useTail>['status'];
+  droppedEntries: number;
+}) {
+  const allowed = canTail(toDatasource(ds));
+  const tooltip = allowed
+    ? enabled
+      ? `Stop live tail${status === 'connecting' ? ' (connecting…)' : ''}`
+      : 'Start live tail'
+    : 'Live tail disabled: basic/bearer auth cannot set headers on a WebSocket. Enable "my proxy sets an auth cookie" in datasource settings to use tail with auth.';
+  return (
+    <button
+      type="button"
+      disabled={!allowed}
+      onClick={() => onToggle(!enabled)}
+      title={tooltip}
+      className={
+        'inline-flex items-center gap-1.5 h-8 px-3 rounded-md border text-sm transition-colors ' +
+        (enabled
+          ? 'border-accent bg-accent/10 text-accent hover:bg-accent/20'
+          : 'border-border bg-background text-muted-foreground hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed')
+      }
+    >
+      <span
+        className={
+          'size-1.5 rounded-full ' +
+          (status === 'open'
+            ? 'bg-accent animate-pulse'
+            : status === 'connecting'
+              ? 'bg-[var(--color-level-warn)] animate-pulse'
+              : status === 'error'
+                ? 'bg-[var(--color-level-error)]'
+                : 'bg-subtle-foreground')
+        }
+      />
+      Live
+      {droppedEntries > 0 && (
+        <span
+          className="text-[10px] text-[var(--color-level-warn)]"
+          title={`${droppedEntries} dropped entries since tail started`}
+        >
+          {droppedEntries} dropped
+        </span>
+      )}
+    </button>
   );
 }
 

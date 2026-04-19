@@ -19,6 +19,10 @@ interface LogListProps {
   onToggleWrap: () => void;
   stats?: LokiStats | undefined;
   onFilterByField?: (label: string, value: string) => void;
+  onOpenContext?: (anchor: {
+    ts: string;
+    labels: Record<string, string>;
+  }) => void;
 }
 
 /** Approximate row height used for virtualization. Actual heights vary. */
@@ -31,6 +35,7 @@ export function LogList({
   onToggleWrap,
   stats,
   onFilterByField,
+  onOpenContext,
 }: LogListProps) {
   const rows = useMemo(() => flattenStreams(streams), [streams]);
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set());
@@ -109,6 +114,7 @@ export function LogList({
                   wrap={wrap}
                   onToggle={() => toggle(v.index)}
                   onFilterByField={onFilterByField}
+                  onOpenContext={onOpenContext}
                 />
               </div>
             );
@@ -125,12 +131,17 @@ function LogRowView({
   wrap,
   onToggle,
   onFilterByField,
+  onOpenContext,
 }: {
   row: LogRow;
   expanded: boolean;
   wrap: boolean;
   onToggle: () => void;
   onFilterByField?: (label: string, value: string) => void;
+  onOpenContext?: (anchor: {
+    ts: string;
+    labels: Record<string, string>;
+  }) => void;
 }) {
   return (
     <div
@@ -171,7 +182,7 @@ function LogRowView({
             />
           )}
           <ParsedFields line={row.line} onFilterByField={onFilterByField} />
-          <CopyActions row={row} />
+          <CopyActions row={row} onOpenContext={onOpenContext} />
         </div>
       )}
     </div>
@@ -249,7 +260,16 @@ function ParsedFields({
   );
 }
 
-function CopyActions({ row }: { row: LogRow }) {
+function CopyActions({
+  row,
+  onOpenContext,
+}: {
+  row: LogRow;
+  onOpenContext?: (anchor: {
+    ts: string;
+    labels: Record<string, string>;
+  }) => void;
+}) {
   const iso = new Date(Number(BigInt(row.ts) / 1_000_000n)).toISOString();
   const labelsStr = Object.entries(row.labels)
     .map(([k, v]) => `${k}=${v}`)
@@ -286,6 +306,16 @@ function CopyActions({ row }: { row: LogRow }) {
       >
         copy as JSON
       </button>
+      {onOpenContext && (
+        <button
+          type="button"
+          onClick={() => onOpenContext({ ts: row.ts, labels: row.labels })}
+          className="hover:text-accent"
+          title="Show surrounding logs from the same stream"
+        >
+          open context
+        </button>
+      )}
     </div>
   );
 }
