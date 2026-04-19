@@ -1,10 +1,66 @@
+import { useEffect, useState } from 'react';
 import { AppShell } from '@/app/AppShell';
+import { FirstRun } from '@/features/datasource/FirstRun';
+import { DatasourceModal } from '@/features/datasource/DatasourceModal';
+import { ExplorePlaceholder } from '@/features/explore/ExplorePlaceholder';
+import { migrate } from '@/lib/state/datasources';
+import {
+  useActiveDatasource,
+  useDatasourceList,
+} from '@/lib/state/useDatasources';
+import type { StoredDatasource } from '@/lib/state/datasources';
 
 export function App() {
+  useEffect(() => {
+    migrate();
+  }, []);
+
+  const datasources = useDatasourceList();
+  const active = useActiveDatasource();
+  const [modal, setModal] = useState<
+    | { kind: 'closed' }
+    | { kind: 'add' }
+    | { kind: 'edit'; ds: StoredDatasource }
+  >({ kind: 'closed' });
+
+  if (datasources.length === 0) {
+    return (
+      <AppShell sidebar={<SidebarPlaceholder />}>
+        <FirstRun onConnected={() => { /* storage drives the re-render */ }} />
+      </AppShell>
+    );
+  }
+
   return (
-    <AppShell sidebar={<SidebarPlaceholder />}>
-      <ExplorePlaceholder />
-    </AppShell>
+    <>
+      <AppShell
+        sidebar={<SidebarPlaceholder />}
+        onAdd={() => setModal({ kind: 'add' })}
+        onEdit={(ds) => setModal({ kind: 'edit', ds })}
+      >
+        {active ? (
+          <ExplorePlaceholder ds={active} />
+        ) : (
+          <div className="h-full grid place-items-center text-muted-foreground">
+            Select a datasource.
+          </div>
+        )}
+      </AppShell>
+
+      {modal.kind === 'add' && (
+        <DatasourceModal
+          onClose={() => setModal({ kind: 'closed' })}
+          onSaved={() => setModal({ kind: 'closed' })}
+        />
+      )}
+      {modal.kind === 'edit' && (
+        <DatasourceModal
+          existing={modal.ds}
+          onClose={() => setModal({ kind: 'closed' })}
+          onSaved={() => setModal({ kind: 'closed' })}
+        />
+      )}
+    </>
   );
 }
 
@@ -15,50 +71,8 @@ function SidebarPlaceholder() {
         Labels
       </div>
       <p className="text-subtle-foreground">
-        Label browser lands after the Loki client and datasource flow.
+        Label browser lands with the Explore feature.
       </p>
-    </div>
-  );
-}
-
-function ExplorePlaceholder() {
-  return (
-    <div className="h-full grid place-items-center px-6 py-16">
-      <div className="max-w-xl text-center space-y-5">
-        <div className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-xs text-muted-foreground tracking-wide">
-          <span className="size-1.5 rounded-full bg-accent animate-pulse" />
-          scaffolding
-        </div>
-        <h1 className="text-3xl font-semibold tracking-tight text-foreground">
-          A better frontend for Grafana Loki
-        </h1>
-        <p className="text-muted-foreground leading-relaxed">
-          Static SPA on GitHub Pages. No backend. Points at any Loki you
-          configure. Up next: Loki client, datasource flow, explore UI.
-        </p>
-        <div className="flex items-center justify-center gap-3 text-sm">
-          <a
-            className="text-accent hover:underline underline-offset-4"
-            href="https://github.com/denysvitali/loki-ui"
-          >
-            GitHub
-          </a>
-          <span className="text-subtle-foreground">·</span>
-          <a
-            className="text-accent hover:underline underline-offset-4"
-            href="https://github.com/denysvitali/loki-ui/blob/main/PLAN.md"
-          >
-            Plan
-          </a>
-          <span className="text-subtle-foreground">·</span>
-          <a
-            className="text-accent hover:underline underline-offset-4"
-            href="https://github.com/denysvitali/loki-ui/blob/main/ROADMAP.md"
-          >
-            Roadmap
-          </a>
-        </div>
-      </div>
     </div>
   );
 }
