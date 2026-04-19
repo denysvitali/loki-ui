@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { AppShell } from '@/app/AppShell';
 import { QueryProvider } from '@/app/QueryProvider';
+import { ShortcutHelp, useShortcutHelp } from '@/components/ShortcutHelp';
 import { FirstRun } from '@/features/datasource/FirstRun';
 import { DatasourceModal } from '@/features/datasource/DatasourceModal';
 import { Explore } from '@/features/explore/Explore';
@@ -31,12 +32,16 @@ function Routes() {
     | { kind: 'add' }
     | { kind: 'edit'; ds: StoredDatasource }
   >({ kind: 'closed' });
+  const help = useShortcutHelp();
 
   if (datasources.length === 0) {
     return (
-      <AppShell>
-        <FirstRun onConnected={() => { /* storage drives re-render */ }} />
-      </AppShell>
+      <>
+        <AppShell>
+          <FirstRun onConnected={() => { /* storage drives re-render */ }} />
+        </AppShell>
+        {help.open && <ShortcutHelp onClose={help.hide} />}
+      </>
     );
   }
 
@@ -68,6 +73,7 @@ function Routes() {
           onSaved={() => setModal({ kind: 'closed' })}
         />
       )}
+      {help.open && <ShortcutHelp onClose={help.hide} />}
     </>
   );
 }

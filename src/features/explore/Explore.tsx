@@ -1,6 +1,6 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { LokiClient, type QueryResponse } from '@/lib/loki';
+import { LokiClient, type QueryResponse, type Stream } from '@/lib/loki';
 import { describe as describeError, LokiRequestError } from '@/lib/loki';
 import {
   loadCredentials,
@@ -9,9 +9,11 @@ import {
 } from '@/lib/state/datasources';
 import { useUrlState } from '@/lib/state/useUrlState';
 import { resolveRange, browserTimeZone } from '@/lib/time/grammar';
+import { recordHistory, type HistoryEntry } from '@/lib/state/history';
 import { LabelBrowser } from '@/features/labels/LabelBrowser';
 import { canTail, useTail } from '@/features/tail/useTail';
 import { ContextPanel, type ContextAnchor } from '@/features/context/ContextPanel';
+import { HistoryPopover } from '@/features/history/HistoryPopover';
 import { TimeRangePicker } from './TimeRangePicker';
 import { LogList } from './LogList';
 import { Histogram } from './Histogram';
@@ -114,6 +116,99 @@ export function Explore({ ds }: ExploreProps) {
   });
 
   const [ctxAnchor, setCtxAnchor] = useState<ContextAnchor | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+
+  // "Load older" pagination: extra streams are merged below the live result.
+  const [olderStreams, setOlderStreams] = useState<Stream[]>([]);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  // Reset pagination when the query/range changes.
+  const prevRunKeyRef = useRef('');
+  useEffect(() => {
+    const runKey = `${pane.query}|${pane.from}|${pane.to}|${urlState.limit}`;
+    if (prevRunKeyRef.current !== runKey) {
+      prevRunKeyRef.current = runKey;
+      setOlderStreams([]);
+    }
+  }, [pane.query, pane.from, pane.to, urlState.limit]);
+
+  // Record successful queries in history.
+  useEffect(() => {
+    if (!result.isSuccess || !pane.query.trim()) return;
+    const stats = result.data.data.stats?.summary;
+    recordHistory(ds.id, {
+      query: pane.query,
+      from: pane.from,
+      to: pane.to,
+      ...(stats?.execTime != null ? { execMs: stats.execTime * 1000 } : {}),
+      ...(stats?.totalBytesProcessed != null
+        ? { bytes: stats.totalBytesProcessed }
+        : {}),
+    });
+  }, [
+    result.isSuccess,
+    result.data,
+    ds.id,
+    pane.query,
+    pane.from,
+    pane.to,
+  ]);
+
+  const loadOlder = async () => {
+    if (
+      !result.data ||
+      result.data.data.resultType !== 'streams' ||
+      !queryRange
+    )
+      return;
+    const streams = [
+      ...(result.data.data.result as Stream[]),
+      ...olderStreams,
+    ];
+    let oldest: bigint | null = null;
+    for (const s of streams) {
+      for (const v of s.values) {
+        const t = BigInt(v[0]);
+        if (oldest === null || t < oldest) oldest = t;
+      }
+    }
+    if (oldest === null) return;
+    setLoadingOlder(true);
+    try {
+      const res = await client.queryRange({
+        query: pane.query,
+        start: queryRange.fromNs,
+        end: oldest,
+        limit: urlState.limit,
+        direction: 'backward',
+      });
+      if (res.data.resultType === 'streams') {
+        const more = res.data.result;
+        setOlderStreams((prev) => dedupeStreams([...prev, ...more]));
+      }
+    } catch (err) {
+      console.warn('load-older failed', err);
+    } finally {
+      setLoadingOlder(false);
+    }
+  };
+
+  const pickHistory = (entry: HistoryEntry, andRun: boolean) => {
+    setDraftQuery(entry.query);
+    setHistoryOpen(false);
+    if (andRun) {
+      updateUrl((s) => ({
+        ...s,
+        panes: [
+          {
+            ...(s.panes[0] ?? pane),
+            query: entry.query,
+            from: entry.from,
+            to: entry.to,
+          },
+        ],
+      }));
+    }
+  };
 
   const handleInsertLabel = (
     label: string,
@@ -164,7 +259,7 @@ export function Explore({ ds }: ExploreProps) {
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
         <form
           onSubmit={onRun}
-          className="border-b border-border bg-card/40 p-3 space-y-2 flex-shrink-0"
+          className="relative border-b border-border bg-card/40 p-3 space-y-2 flex-shrink-0"
         >
           <textarea
             value={draftQuery}
@@ -173,6 +268,19 @@ export function Explore({ ds }: ExploreProps) {
               if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
                 e.preventDefault();
                 onRun();
+                return;
+              }
+              if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'h') {
+                e.preventDefault();
+                setHistoryOpen(true);
+                return;
+              }
+              if (
+                e.key === 'ArrowUp' &&
+                (e.currentTarget.value === '' || !e.currentTarget.value.trim())
+              ) {
+                e.preventDefault();
+                setHistoryOpen(true);
               }
             }}
             placeholder='{app="foo"} |= "error"'
@@ -180,6 +288,13 @@ export function Explore({ ds }: ExploreProps) {
             spellCheck={false}
             className="w-full px-3 py-2 rounded-md bg-background border border-input font-mono text-sm text-foreground placeholder:text-subtle-foreground focus:border-ring focus:outline-none resize-y"
           />
+          {historyOpen && (
+            <HistoryPopover
+              dsId={ds.id}
+              onPick={pickHistory}
+              onClose={() => setHistoryOpen(false)}
+            />
+          )}
           <div className="flex items-center gap-2 flex-wrap">
             <TimeRangePicker
               from={pane.from}
@@ -198,6 +313,14 @@ export function Explore({ ds }: ExploreProps) {
               status={tail.status}
               droppedEntries={tail.droppedEntries}
             />
+            <button
+              type="button"
+              onClick={() => setHistoryOpen(true)}
+              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-border bg-background text-sm text-muted-foreground hover:bg-muted transition-colors"
+              title="Query history (Ctrl/Cmd+H)"
+            >
+              History
+            </button>
             <button
               type="submit"
               className="h-8 px-4 rounded-md text-sm font-medium bg-accent text-accent-foreground hover:opacity-90 transition-opacity"
@@ -244,39 +367,71 @@ export function Explore({ ds }: ExploreProps) {
             <EmptyState>Waiting for new entries…</EmptyState>
           )}
 
-          {!live && result.data && result.data.data.resultType === 'streams' && (
-            <>
-              {queryRange && (
-                <Histogram
-                  ds={ds}
-                  query={pane.query}
-                  fromNs={queryRange.fromNs}
-                  toNs={queryRange.toNs}
-                  onZoom={(fromNs, toNs) => {
-                    onTimeChange(fromNs.toString(), toNs.toString());
-                  }}
-                />
-              )}
-              <div className="flex-1 min-h-0">
-                {result.data.data.result.length === 0 ? (
-                  <EmptyState>No logs matched in this time range.</EmptyState>
-                ) : (
-                  <LogList
-                    streams={result.data.data.result}
-                    wrap={urlState.wrap}
-                    onToggleWrap={() =>
-                      updateUrl((s) => ({ ...s, wrap: !s.wrap }))
-                    }
-                    stats={result.data.data.stats}
-                    onFilterByField={(label, value) =>
-                      handleInsertLabel(label, value, '=')
-                    }
-                    onOpenContext={(anchor) => setCtxAnchor(anchor)}
+          {!live && result.data && result.data.data.resultType === 'streams' && (() => {
+            const baseStreams = result.data.data.result as Stream[];
+            const merged = dedupeStreams([...baseStreams, ...olderStreams]);
+            const totalEntries = merged.reduce(
+              (n, s) => n + s.values.length,
+              0,
+            );
+            const baseCount = baseStreams.reduce(
+              (n, s) => n + s.values.length,
+              0,
+            );
+            const hitLimit = baseCount >= urlState.limit;
+            return (
+              <>
+                {queryRange && (
+                  <Histogram
+                    ds={ds}
+                    query={pane.query}
+                    fromNs={queryRange.fromNs}
+                    toNs={queryRange.toNs}
+                    onZoom={(fromNs, toNs) => {
+                      onTimeChange(fromNs.toString(), toNs.toString());
+                    }}
                   />
                 )}
-              </div>
-            </>
-          )}
+                <div className="flex-1 min-h-0 flex flex-col">
+                  {totalEntries === 0 ? (
+                    <EmptyState>No logs matched in this time range.</EmptyState>
+                  ) : (
+                    <>
+                      <LogList
+                        streams={merged}
+                        wrap={urlState.wrap}
+                        onToggleWrap={() =>
+                          updateUrl((s) => ({ ...s, wrap: !s.wrap }))
+                        }
+                        stats={result.data.data.stats}
+                        onFilterByField={(label, value) =>
+                          handleInsertLabel(label, value, '=')
+                        }
+                        onOpenContext={(anchor) => setCtxAnchor(anchor)}
+                      />
+                      {hitLimit && (
+                        <div className="flex-shrink-0 border-t border-border px-3 py-2 flex items-center justify-between gap-3 bg-card/40">
+                          <span className="text-xs text-muted-foreground">
+                            showing {totalEntries.toLocaleString()}{' '}
+                            {totalEntries === 1 ? 'entry' : 'entries'} — more
+                            may exist
+                          </span>
+                          <button
+                            type="button"
+                            disabled={loadingOlder}
+                            onClick={loadOlder}
+                            className="h-7 px-3 rounded-md text-xs font-medium bg-background border border-border text-foreground hover:bg-muted disabled:opacity-50"
+                          >
+                            {loadingOlder ? 'Loading…' : 'Load older'}
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </>
+            );
+          })()}
 
           {result.data &&
             (result.data.data.resultType === 'matrix' ||
@@ -355,6 +510,40 @@ function TailToggle({
       )}
     </button>
   );
+}
+
+/**
+ * Merge + dedupe streams by (labels, ts, line). Loki can return the same
+ * entry at a boundary when paginating with end = oldest.ts (end is exclusive
+ * but nanosecond collisions exist).
+ */
+function dedupeStreams(streams: Stream[]): Stream[] {
+  const byKey = new Map<string, Stream>();
+  for (const s of streams) {
+    const k = streamKey(s.stream);
+    const prev = byKey.get(k);
+    if (prev) {
+      prev.values = prev.values.concat(s.values);
+    } else {
+      byKey.set(k, { stream: s.stream, values: [...s.values] });
+    }
+  }
+  for (const s of byKey.values()) {
+    const seen = new Set<string>();
+    s.values = s.values.filter((v) => {
+      const dk = `${v[0]}|${v[1]}`;
+      if (seen.has(dk)) return false;
+      seen.add(dk);
+      return true;
+    });
+    s.values.sort((a, b) => (BigInt(b[0]) > BigInt(a[0]) ? 1 : -1));
+  }
+  return [...byKey.values()];
+}
+
+function streamKey(labels: Record<string, string>): string {
+  const keys = Object.keys(labels).sort();
+  return keys.map((k) => `${k}=${labels[k]}`).join(',');
 }
 
 /** Extract the leading `{...}` stream selector from a LogQL query. */
