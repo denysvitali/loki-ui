@@ -1,0 +1,26 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      tanstack:
+        patterns:
+          - '@tanstack/*'
+      codemirror:
+        patterns:
+          - '@codemirror/*'
+          - '@lezer/*'
+          - 'codemirror'
+      react:
+        patterns:
+          - 'react'
+          - 'react-dom'
+          - '@types/react'
+          - '@types/react-dom'
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

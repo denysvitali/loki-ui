@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { AppShell } from '@/app/AppShell';
 import { QueryProvider } from '@/app/QueryProvider';
 import { ShortcutHelp, useShortcutHelp } from '@/components/ShortcutHelp';
+import { UpdateToast } from '@/components/UpdateToast';
 import { FirstRun } from '@/features/datasource/FirstRun';
 import { DatasourceModal } from '@/features/datasource/DatasourceModal';
 import { Explore } from '@/features/explore/Explore';
@@ -20,6 +21,7 @@ export function App() {
   return (
     <QueryProvider>
       <Routes />
+      <UpdateToast />
     </QueryProvider>
   );
 }

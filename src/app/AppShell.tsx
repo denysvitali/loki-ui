@@ -56,7 +56,7 @@ function Brand() {
       <span className="font-semibold tracking-tight text-foreground">
         loki-ui
       </span>
-      <span className="text-xs text-subtle-foreground">v0.0.0</span>
+      <span className="text-xs text-subtle-foreground">v0.1.0</span>
     </div>
   );
 }
