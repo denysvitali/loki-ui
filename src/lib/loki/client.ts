@@ -1,4 +1,11 @@
-import type { BuildInfo, Credentials, Datasource } from './types';
+import type {
+  BuildInfo,
+  Credentials,
+  Datasource,
+  LabelsResponse,
+  QueryResponse,
+  QueryResponseMatrix,
+} from './types';
 import {
   LokiRequestError,
   classifyHttpError,
@@ -43,6 +50,142 @@ export class LokiClient {
 
   async buildInfo(signal?: AbortSignal): Promise<BuildInfo> {
     return this.getJson<BuildInfo>('/loki/api/v1/status/buildinfo', signal);
+  }
+
+  // ----- query methods ----------------------------------------------------
+
+  /**
+   * `/loki/api/v1/query_range`. `start`/`end` are nanosecond bigints.
+   * `step`/`interval` are seconds (numbers). `direction` defaults to
+   * 'backward' (most recent first) per PLAN §4.8.
+   */
+  async queryRange(
+    params: {
+      query: string;
+      start: bigint;
+      end: bigint;
+      limit?: number;
+      step?: number;
+      interval?: number;
+      direction?: 'forward' | 'backward';
+    },
+    signal?: AbortSignal,
+  ): Promise<QueryResponse> {
+    const p = new URLSearchParams();
+    p.set('query', params.query);
+    p.set('start', params.start.toString());
+    p.set('end', params.end.toString());
+    p.set('limit', String(params.limit ?? 1000));
+    if (params.step != null) p.set('step', `${params.step}s`);
+    if (params.interval != null) p.set('interval', `${params.interval}s`);
+    p.set('direction', params.direction ?? 'backward');
+    return this.getJson<QueryResponse>(
+      `/loki/api/v1/query_range?${p.toString()}`,
+      signal,
+    );
+  }
+
+  /** `/loki/api/v1/query` — instant query, metric-only. */
+  async query(
+    params: { query: string; time?: bigint; limit?: number },
+    signal?: AbortSignal,
+  ): Promise<QueryResponse> {
+    const p = new URLSearchParams();
+    p.set('query', params.query);
+    if (params.time != null) p.set('time', params.time.toString());
+    if (params.limit != null) p.set('limit', String(params.limit));
+    return this.getJson<QueryResponse>(
+      `/loki/api/v1/query?${p.toString()}`,
+      signal,
+    );
+  }
+
+  async labels(
+    params: { start?: bigint; end?: bigint; query?: string } = {},
+    signal?: AbortSignal,
+  ): Promise<string[]> {
+    const p = timeParams(params);
+    if (params.query) p.set('query', params.query);
+    const res = await this.getJson<LabelsResponse>(
+      `/loki/api/v1/labels?${p.toString()}`,
+      signal,
+    );
+    return res.data;
+  }
+
+  async labelValues(
+    name: string,
+    params: { start?: bigint; end?: bigint; query?: string } = {},
+    signal?: AbortSignal,
+  ): Promise<string[]> {
+    const p = timeParams(params);
+    if (params.query) p.set('query', params.query);
+    const res = await this.getJson<LabelsResponse>(
+      `/loki/api/v1/label/${encodeURIComponent(name)}/values?${p.toString()}`,
+      signal,
+    );
+    return res.data;
+  }
+
+  async series(
+    params: { matches: string[]; start?: bigint; end?: bigint },
+    signal?: AbortSignal,
+  ): Promise<Array<Record<string, string>>> {
+    const p = timeParams(params);
+    for (const m of params.matches) p.append('match[]', m);
+    const res = await this.getJson<{
+      status: 'success';
+      data: Array<Record<string, string>>;
+    }>(`/loki/api/v1/series?${p.toString()}`, signal);
+    return res.data;
+  }
+
+  async indexStats(
+    params: { query: string; start: bigint; end: bigint },
+    signal?: AbortSignal,
+  ): Promise<{
+    streams: number;
+    chunks: number;
+    entries: number;
+    bytes: number;
+  }> {
+    const p = timeParams(params);
+    p.set('query', params.query);
+    return this.getJson(`/loki/api/v1/index/stats?${p.toString()}`, signal);
+  }
+
+  async volumeRange(
+    params: {
+      query: string;
+      start: bigint;
+      end: bigint;
+      step: number;
+      targetLabels?: string[];
+      aggregateBy?: 'series' | 'labels';
+      limit?: number;
+    },
+    signal?: AbortSignal,
+  ): Promise<QueryResponseMatrix> {
+    const p = timeParams(params);
+    p.set('query', params.query);
+    p.set('step', `${params.step}s`);
+    if (params.targetLabels?.length)
+      p.set('targetLabels', params.targetLabels.join(','));
+    if (params.aggregateBy) p.set('aggregateBy', params.aggregateBy);
+    if (params.limit != null) p.set('limit', String(params.limit));
+    return this.getJson<QueryResponseMatrix>(
+      `/loki/api/v1/index/volume_range?${p.toString()}`,
+      signal,
+    );
+  }
+
+  async formatQuery(query: string, signal?: AbortSignal): Promise<string> {
+    const p = new URLSearchParams({ query });
+    const res = await this.getJson<{ status: 'success'; data: string }>(
+      `/loki/api/v1/format_query?${p.toString()}`,
+      signal,
+    );
+    return res.data;
   }
 
   // ----- internals --------------------------------------------------------
@@ -174,6 +317,13 @@ function classifyFetchFailure(err: unknown, _url: string): LokiError {
 
   const cause = err instanceof Error ? err.message : String(err);
   return { kind: 'network', online, cause };
+}
+
+function timeParams(params: { start?: bigint; end?: bigint }): URLSearchParams {
+  const p = new URLSearchParams();
+  if (params.start != null) p.set('start', params.start.toString());
+  if (params.end != null) p.set('end', params.end.toString());
+  return p;
 }
 
 async function safeText(res: Response): Promise<string> {

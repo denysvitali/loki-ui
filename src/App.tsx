@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { AppShell } from '@/app/AppShell';
+import { QueryProvider } from '@/app/QueryProvider';
 import { FirstRun } from '@/features/datasource/FirstRun';
 import { DatasourceModal } from '@/features/datasource/DatasourceModal';
-import { ExplorePlaceholder } from '@/features/explore/ExplorePlaceholder';
+import { Explore } from '@/features/explore/Explore';
 import { migrate } from '@/lib/state/datasources';
 import {
   useActiveDatasource,
@@ -15,6 +16,14 @@ export function App() {
     migrate();
   }, []);
 
+  return (
+    <QueryProvider>
+      <Routes />
+    </QueryProvider>
+  );
+}
+
+function Routes() {
   const datasources = useDatasourceList();
   const active = useActiveDatasource();
   const [modal, setModal] = useState<
@@ -26,7 +35,7 @@ export function App() {
   if (datasources.length === 0) {
     return (
       <AppShell sidebar={<SidebarPlaceholder />}>
-        <FirstRun onConnected={() => { /* storage drives the re-render */ }} />
+        <FirstRun onConnected={() => { /* storage drives re-render */ }} />
       </AppShell>
     );
   }
@@ -39,7 +48,7 @@ export function App() {
         onEdit={(ds) => setModal({ kind: 'edit', ds })}
       >
         {active ? (
-          <ExplorePlaceholder ds={active} />
+          <Explore ds={active} />
         ) : (
           <div className="h-full grid place-items-center text-muted-foreground">
             Select a datasource.
@@ -71,7 +80,7 @@ function SidebarPlaceholder() {
         Labels
       </div>
       <p className="text-subtle-foreground">
-        Label browser lands with the Explore feature.
+        Label browser lands in the next commit.
       </p>
     </div>
   );
