@@ -1,5 +1,7 @@
-import { useMemo } from 'react';
+import { useMemo, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import type { LokiStats, Stream, StreamValue } from '@/lib/loki';
+import { parseStructured } from '@/lib/parse/structured';
 
 interface LogRow {
   ts: string; // ns epoch as string
@@ -9,17 +11,51 @@ interface LogRow {
   level: Level;
 }
 
-type Level = 'error' | 'warn' | 'info' | 'debug' | 'none';
+export type Level = 'error' | 'warn' | 'info' | 'debug' | 'none';
 
 interface LogListProps {
   streams: Stream[];
   wrap: boolean;
   onToggleWrap: () => void;
   stats?: LokiStats | undefined;
+  onFilterByField?: (label: string, value: string) => void;
 }
 
-export function LogList({ streams, wrap, onToggleWrap, stats }: LogListProps) {
+/** Approximate row height used for virtualization. Actual heights vary. */
+const COLLAPSED_HEIGHT = 22;
+const EXPANDED_OVERHEAD = 120;
+
+export function LogList({
+  streams,
+  wrap,
+  onToggleWrap,
+  stats,
+  onFilterByField,
+}: LogListProps) {
   const rows = useMemo(() => flattenStreams(streams), [streams]);
+  const [expanded, setExpanded] = useState<Set<number>>(() => new Set());
+  const parentRef = useRef<HTMLDivElement>(null);
+
+  const virtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: (i) =>
+      expanded.has(i) ? COLLAPSED_HEIGHT + EXPANDED_OVERHEAD : COLLAPSED_HEIGHT,
+    overscan: 20,
+  });
+
+  const toggle = (i: number) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+    // Force virtualizer to remeasure the toggled row.
+    virtualizer.measure();
+  };
+
+  if (rows.length === 0) return null;
 
   return (
     <div className="h-full flex flex-col">
@@ -28,40 +64,228 @@ export function LogList({ streams, wrap, onToggleWrap, stats }: LogListProps) {
           {rows.length.toLocaleString()} {rows.length === 1 ? 'entry' : 'entries'}
         </span>
         <div className="flex items-center gap-3">
-          {stats?.summary && (
-            <Stats stats={stats} />
-          )}
+          {stats?.summary && <Stats stats={stats} />}
           <label className="inline-flex items-center gap-1.5 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={wrap}
-              onChange={onToggleWrap}
-            />
+            <input type="checkbox" checked={wrap} onChange={onToggleWrap} />
             wrap lines
           </label>
         </div>
       </div>
-      <ul className="flex-1 overflow-auto divide-y divide-border/50 font-mono text-xs">
-        {rows.map((row, i) => (
-          <li
-            key={`${row.ts}-${i}`}
-            className="flex items-start gap-3 px-3 py-1 hover:bg-muted/40"
+      <div
+        ref={parentRef}
+        role="grid"
+        aria-rowcount={rows.length}
+        aria-label="Log entries"
+        className="flex-1 overflow-auto font-mono text-xs"
+      >
+        <div
+          style={{
+            height: `${virtualizer.getTotalSize()}px`,
+            position: 'relative',
+            width: '100%',
+          }}
+        >
+          {virtualizer.getVirtualItems().map((v) => {
+            const row = rows[v.index]!;
+            const isExpanded = expanded.has(v.index);
+            return (
+              <div
+                key={v.key}
+                data-index={v.index}
+                ref={(el) => el && virtualizer.measureElement(el)}
+                role="row"
+                aria-rowindex={v.index + 1}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  transform: `translateY(${v.start}px)`,
+                }}
+              >
+                <LogRowView
+                  row={row}
+                  expanded={isExpanded}
+                  wrap={wrap}
+                  onToggle={() => toggle(v.index)}
+                  onFilterByField={onFilterByField}
+                />
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LogRowView({
+  row,
+  expanded,
+  wrap,
+  onToggle,
+  onFilterByField,
+}: {
+  row: LogRow;
+  expanded: boolean;
+  wrap: boolean;
+  onToggle: () => void;
+  onFilterByField?: (label: string, value: string) => void;
+}) {
+  return (
+    <div
+      className="border-b border-border/40 hover:bg-muted/40 focus-within:bg-muted/40"
+      onClick={onToggle}
+    >
+      <div className="flex items-start gap-3 px-3 py-1 cursor-pointer">
+        <LevelBadge level={row.level} />
+        <span className="text-subtle-foreground shrink-0 tabular-nums select-none">
+          {formatTs(row.ts)}
+        </span>
+        <span
+          className={
+            'flex-1 min-w-0 text-foreground ' +
+            (wrap
+              ? 'whitespace-pre-wrap break-words'
+              : 'whitespace-pre overflow-hidden text-ellipsis')
+          }
+        >
+          {expanded ? row.line : row.line.slice(0, 1000)}
+        </span>
+      </div>
+      {expanded && (
+        <div
+          className="px-3 pb-2 pl-[60px] space-y-2"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <FieldTree
+            title="labels"
+            fields={row.labels}
+            onFilterByField={onFilterByField}
+          />
+          {row.metadata && Object.keys(row.metadata).length > 0 && (
+            <FieldTree
+              title="metadata"
+              fields={row.metadata}
+              tone="accent"
+            />
+          )}
+          <ParsedFields line={row.line} onFilterByField={onFilterByField} />
+          <CopyActions row={row} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FieldTree({
+  title,
+  fields,
+  tone = 'muted',
+  onFilterByField,
+}: {
+  title: string;
+  fields: Record<string, string>;
+  tone?: 'muted' | 'accent';
+  onFilterByField?: (label: string, value: string) => void;
+}) {
+  const entries = Object.entries(fields);
+  if (entries.length === 0) return null;
+  const pillBg = tone === 'accent' ? 'bg-accent/10' : 'bg-muted';
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wider text-subtle-foreground mb-1">
+        {title}
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {entries.map(([k, v]) => (
+          <button
+            key={k}
+            type="button"
+            onClick={() => onFilterByField?.(k, v)}
+            title={onFilterByField ? `Filter by ${k}="${v}"` : undefined}
+            className={`inline-flex items-center max-w-[28rem] rounded border border-border ${pillBg} px-1.5 py-0.5 text-[11px] hover:border-accent`}
           >
-            <LevelBadge level={row.level} />
-            <span className="text-subtle-foreground shrink-0 tabular-nums">
-              {formatTs(row.ts)}
-            </span>
-            <span
-              className={
-                'flex-1 min-w-0 text-foreground ' +
-                (wrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre overflow-hidden text-ellipsis')
-              }
-            >
-              {row.line}
-            </span>
-          </li>
+            <span className="text-muted-foreground">{k}</span>
+            <span className="text-subtle-foreground mx-1">=</span>
+            <span className="text-foreground truncate">{v}</span>
+          </button>
         ))}
-      </ul>
+      </div>
+    </div>
+  );
+}
+
+function ParsedFields({
+  line,
+  onFilterByField,
+}: {
+  line: string;
+  onFilterByField?: (label: string, value: string) => void;
+}) {
+  const parsed = useMemo(() => parseStructured(line), [line]);
+  if (!parsed) return null;
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wider text-subtle-foreground mb-1">
+        {parsed.format} fields
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {Object.entries(parsed.fields).map(([k, v]) => (
+          <button
+            key={k}
+            type="button"
+            onClick={() => onFilterByField?.(k, String(v))}
+            title={onFilterByField ? `Filter by ${k}="${v}"` : undefined}
+            className="inline-flex items-center max-w-[28rem] rounded border border-border bg-background px-1.5 py-0.5 text-[11px] hover:border-accent"
+          >
+            <span className="text-muted-foreground">{k}</span>
+            <span className="text-subtle-foreground mx-1">=</span>
+            <span className="text-foreground truncate">{String(v)}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CopyActions({ row }: { row: LogRow }) {
+  const iso = new Date(Number(BigInt(row.ts) / 1_000_000n)).toISOString();
+  const labelsStr = Object.entries(row.labels)
+    .map(([k, v]) => `${k}=${v}`)
+    .join(' ');
+  const copy = (s: string) => navigator.clipboard?.writeText(s);
+  return (
+    <div className="flex items-center gap-3 text-[11px] text-subtle-foreground">
+      <button
+        type="button"
+        onClick={() => copy(row.line)}
+        className="hover:text-foreground"
+      >
+        copy line
+      </button>
+      <button
+        type="button"
+        onClick={() => copy(`${iso}\t${labelsStr}\t${row.line}`)}
+        className="hover:text-foreground"
+      >
+        copy with labels
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          copy(
+            JSON.stringify(
+              { ts: row.ts, iso, labels: row.labels, line: row.line },
+              null,
+              2,
+            ),
+          )
+        }
+        className="hover:text-foreground"
+      >
+        copy as JSON
+      </button>
     </div>
   );
 }
@@ -126,16 +350,17 @@ function flattenStreams(streams: Stream[]): LogRow[] {
       });
     }
   }
-  // Already sorted descending by Loki when direction=backward, but keep it
-  // robust if streams were interleaved.
   out.sort((a, b) => (BigInt(b.ts) > BigInt(a.ts) ? 1 : -1));
   return out;
 }
 
 function detectLevel(labels: Record<string, string>, line: string): Level {
-  const labelValue = labels['level'] ?? labels['lvl'] ?? labels['severity'] ?? labels['log_level'];
+  const labelValue =
+    labels['level'] ??
+    labels['lvl'] ??
+    labels['severity'] ??
+    labels['log_level'];
   if (labelValue) return normalizeLevel(labelValue);
-  // Cheap regex heuristic.
   if (/\b(fatal|critical|panic|err(or)?|alert)\b/i.test(line)) return 'error';
   if (/\b(warn(ing)?|caution)\b/i.test(line)) return 'warn';
   if (/\b(info|notice)\b/i.test(line)) return 'info';

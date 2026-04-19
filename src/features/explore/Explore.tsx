@@ -11,6 +11,7 @@ import { useUrlState } from '@/lib/state/useUrlState';
 import { resolveRange, browserTimeZone } from '@/lib/time/grammar';
 import { TimeRangePicker } from './TimeRangePicker';
 import { LogList } from './LogList';
+import { Histogram } from './Histogram';
 
 interface ExploreProps {
   ds: StoredDatasource;
@@ -147,14 +148,39 @@ export function Explore({ ds }: ExploreProps) {
         )}
 
         {result.data && result.data.data.resultType === 'streams' && (
-          <LogList
-            streams={result.data.data.result}
-            wrap={urlState.wrap}
-            onToggleWrap={() =>
-              updateUrl((s) => ({ ...s, wrap: !s.wrap }))
-            }
-            stats={result.data.data.stats}
-          />
+          <div className="h-full flex flex-col">
+            {range && (
+              <Histogram
+                ds={ds}
+                query={pane.query}
+                fromNs={range.fromNs}
+                toNs={range.toNs}
+                onZoom={(fromNs, toNs) => {
+                  onTimeChange(fromNs.toString(), toNs.toString());
+                }}
+              />
+            )}
+            <div className="flex-1 min-h-0">
+              <LogList
+                streams={result.data.data.result}
+                wrap={urlState.wrap}
+                onToggleWrap={() =>
+                  updateUrl((s) => ({ ...s, wrap: !s.wrap }))
+                }
+                stats={result.data.data.stats}
+                onFilterByField={(label, value) => {
+                  const inserted = appendFilter(pane.query, label, value);
+                  setDraftQuery(inserted);
+                  updateUrl((s) => ({
+                    ...s,
+                    panes: [
+                      { ...(s.panes[0] ?? pane), query: inserted },
+                    ],
+                  }));
+                }}
+              />
+            </div>
+          </div>
         )}
 
         {result.data &&
@@ -174,6 +200,19 @@ export function Explore({ ds }: ExploreProps) {
       </div>
     </div>
   );
+}
+
+/**
+ * Adds `| label="value"` to a LogQL query (or replaces existing equality
+ * for the same label). Best-effort — good enough for the "filter by"
+ * affordance; full AST editing comes with the CodeMirror commit.
+ */
+function appendFilter(query: string, label: string, value: string): string {
+  const escaped = value.replace(/"/g, '\\"');
+  const clause = `| ${label}="${escaped}"`;
+  // If the query already contains this exact clause, return unchanged.
+  if (query.includes(clause)) return query;
+  return `${query.trim()} ${clause}`;
 }
 
 function useMirrorDatasource(
