@@ -348,10 +348,55 @@ function HighlightedLine({
   const text = expanded ? line : line.slice(0, 1000);
   if (!parsed) return <>{text}</>;
 
+  if (parsed.format === 'json') return <JsonHighlight fields={parsed.fields} />;
   if (parsed.format === 'logfmt') return <LogfmtHighlight fields={parsed.fields} />;
   if (parsed.format === 'tabular')
     return <TabularHighlight fields={parsed.fields} />;
   return <>{text}</>;
+}
+
+const JSON_META_KEYS = new Set(['time', 'ts', 'timestamp', 'level', 'lvl', 'severity', 'log_level']);
+const JSON_MSG_KEYS = new Set(['msg', 'message']);
+
+function JsonHighlight({
+  fields,
+}: {
+  fields: Record<string, string | number | boolean | null>;
+}) {
+  const entries = Object.entries(fields);
+  const sorted = entries.sort(([a], [b]) => {
+    const aM = JSON_MSG_KEYS.has(a) ? 0 : JSON_META_KEYS.has(a) ? 2 : 1;
+    const bM = JSON_MSG_KEYS.has(b) ? 0 : JSON_META_KEYS.has(b) ? 2 : 1;
+    return aM - bM;
+  });
+
+  return (
+    <>
+      {sorted.map(([key, raw], i) => {
+        const val = String(raw ?? '');
+        const isMsg = JSON_MSG_KEYS.has(key);
+        const isMeta = JSON_META_KEYS.has(key);
+        return (
+          <span key={key}>
+            {i > 0 && ' '}
+            <span className={isMeta ? 'text-subtle-foreground/60' : 'text-muted-foreground'}>{key}</span>
+            <span className="text-subtle-foreground">=</span>
+            <span
+              className={
+                isMsg
+                  ? 'text-foreground font-medium'
+                  : isMeta
+                    ? 'text-subtle-foreground/60'
+                    : ''
+              }
+            >
+              {val}
+            </span>
+          </span>
+        );
+      })}
+    </>
+  );
 }
 
 const LOGFMT_META_KEYS = new Set(['time', 'ts', 'timestamp', 'level', 'lvl', 'severity']);

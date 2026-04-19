@@ -29,7 +29,7 @@ export const DEFAULT_URL_STATE: UrlState = {
   panes: [{ datasourceId: null, query: '', from: 'now-1h', to: 'now' }],
   limit: 1000,
   live: false,
-  wrap: false,
+  wrap: true,
   ctx: null,
 };
 
