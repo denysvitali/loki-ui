@@ -91,7 +91,7 @@ export function decodeUrlState(search: string): UrlState {
     panes,
     limit: parseIntSafe(p.get('limit'), DEFAULT_URL_STATE.limit),
     live: p.get('live') === '1',
-    wrap: p.get('wrap') === '1',
+    wrap: p.has('wrap') ? p.get('wrap') === '1' : DEFAULT_URL_STATE.wrap,
     ctx: p.get('ctx'),
   };
 }
