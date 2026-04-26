@@ -23,7 +23,7 @@ jobs:
     # Until then it no-ops green.
     continue-on-error: true
     steps:
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@v5
         continue-on-error: true
         with:
           config-file: release-please-config.json
